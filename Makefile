@@ -1,10 +1,10 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -I src
-LDFLAGS = -lssl -lcrypto
+LDFLAGS =
 
 SRCDIR = src
 SOURCES = $(wildcard $(SRCDIR)/*.c)
-TARGET = todo
+TARGET = blockchain
 
 .PHONY: all clean
 
@@ -15,7 +15,6 @@ $(TARGET): $(SOURCES)
 
 clean:
 	rm -f $(TARGET)
-	rm -rf data/
 
 run: $(TARGET)
 	./$(TARGET)

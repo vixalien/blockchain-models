@@ -1,15 +1,16 @@
 #include "todo.h"
 #include "blockchain.h"
+#include "transaction.h"
+#include "mining.h"
 #include "storage.h"
 #include "auth.h"
 #include <stdio.h>
 #include <string.h>
 
-// Helper structure to track unique tasks and their completion status
 typedef struct {
     char task[MAX_TASK_LEN];
     int completed;
-    int block_index;  // Index in blockchain for reference
+    int block_index;
 } TaskStatus;
 
 int add_task(const char *task) {
@@ -23,26 +24,40 @@ int add_task(const char *task) {
         return 0;
     }
 
+    if (!validate_text(task)) {
+        printf("Task cannot contain |, ;, or , characters.\n");
+        return 0;
+    }
+
     Block blocks[MAX_BLOCKS];
     int count;
     load_blockchain(blocks, &count);
 
-    // Get previous hash (from last block or genesis)
-    char prev_hash[HASH_LEN];
-    if (count > 0) {
-        strncpy(prev_hash, blocks[count - 1].hash, HASH_LEN);
-    } else {
-        // Create genesis block first
+    LedgerModel model;
+    int difficulty;
+    load_config(&model, &difficulty);
+
+    if (count == 0) {
         Block genesis = create_genesis();
         if (!save_block(&genesis)) {
             printf("Failed to create genesis block.\n");
             return 0;
         }
-        strncpy(prev_hash, genesis.hash, HASH_LEN);
+        blocks[0] = genesis;
         count = 1;
     }
 
-    Block new_block = create_block(count, task, get_current_user(), prev_hash, 0);
+    /* Create TX_TASK transaction */
+    Transaction tx;
+    create_task_tx(&tx, get_current_user(), task, 0);
+
+    /* Create block and mine it */
+    Block new_block = create_block(count, &tx, get_current_user(), difficulty, blocks[count - 1].hash);
+
+    printf("Mining task block (difficulty %d)...\n", difficulty);
+    int attempts = mine_block(&new_block);
+    printf("Block mined! Attempts: %d\n", attempts);
+
     if (!save_block(&new_block)) {
         printf("Failed to save task.\n");
         return 0;
@@ -62,33 +77,29 @@ void view_tasks(void) {
     int count;
     load_blockchain(blocks, &count);
 
-    // Collect unique tasks for current user with latest status
     TaskStatus tasks[MAX_BLOCKS];
     int task_count = 0;
-
     const char *username = get_current_user();
 
     for (int i = 0; i < count; i++) {
-        if (strcmp(blocks[i].username, username) != 0) continue;
-        if (strcmp(blocks[i].task, "Genesis Block") == 0) continue;
+        if (blocks[i].tx.type != TX_TASK) continue;
+        if (strcmp(blocks[i].tx.receiver, username) != 0) continue;
+        if (strcmp(blocks[i].tx.task, "Genesis Block") == 0) continue;
 
-        // Check if this task already exists in our list
         int found = -1;
         for (int j = 0; j < task_count; j++) {
-            if (strcmp(tasks[j].task, blocks[i].task) == 0) {
+            if (strcmp(tasks[j].task, blocks[i].tx.task) == 0) {
                 found = j;
                 break;
             }
         }
 
         if (found >= 0) {
-            // Update completion status (later blocks have precedence)
-            tasks[found].completed = blocks[i].completed;
+            tasks[found].completed = blocks[i].tx.completed;
             tasks[found].block_index = i;
         } else {
-            // Add new task
-            strncpy(tasks[task_count].task, blocks[i].task, MAX_TASK_LEN);
-            tasks[task_count].completed = blocks[i].completed;
+            strncpy(tasks[task_count].task, blocks[i].tx.task, MAX_TASK_LEN);
+            tasks[task_count].completed = blocks[i].tx.completed;
             tasks[task_count].block_index = i;
             task_count++;
         }
@@ -124,29 +135,33 @@ int complete_task(int task_num) {
     int count;
     load_blockchain(blocks, &count);
 
-    // Build task list (same logic as view_tasks)
+    LedgerModel model;
+    int difficulty;
+    load_config(&model, &difficulty);
+
     TaskStatus tasks[MAX_BLOCKS];
     int task_count = 0;
     const char *username = get_current_user();
 
     for (int i = 0; i < count; i++) {
-        if (strcmp(blocks[i].username, username) != 0) continue;
-        if (strcmp(blocks[i].task, "Genesis Block") == 0) continue;
+        if (blocks[i].tx.type != TX_TASK) continue;
+        if (strcmp(blocks[i].tx.receiver, username) != 0) continue;
+        if (strcmp(blocks[i].tx.task, "Genesis Block") == 0) continue;
 
         int found = -1;
         for (int j = 0; j < task_count; j++) {
-            if (strcmp(tasks[j].task, blocks[i].task) == 0) {
+            if (strcmp(tasks[j].task, blocks[i].tx.task) == 0) {
                 found = j;
                 break;
             }
         }
 
         if (found >= 0) {
-            tasks[found].completed = blocks[i].completed;
+            tasks[found].completed = blocks[i].tx.completed;
             tasks[found].block_index = i;
         } else {
-            strncpy(tasks[task_count].task, blocks[i].task, MAX_TASK_LEN);
-            tasks[task_count].completed = blocks[i].completed;
+            strncpy(tasks[task_count].task, blocks[i].tx.task, MAX_TASK_LEN);
+            tasks[task_count].completed = blocks[i].tx.completed;
             tasks[task_count].block_index = i;
             task_count++;
         }
@@ -163,12 +178,14 @@ int complete_task(int task_num) {
         return 0;
     }
 
-    // Create a new block marking the task as complete
-    // This preserves blockchain immutability
-    char prev_hash[HASH_LEN];
-    strncpy(prev_hash, blocks[count - 1].hash, HASH_LEN);
+    Transaction tx;
+    create_task_tx(&tx, username, tasks[idx].task, 1);
 
-    Block complete_block = create_block(count, tasks[idx].task, username, prev_hash, 1);
+    Block complete_block = create_block(count, &tx, username, difficulty, blocks[count - 1].hash);
+
+    printf("Mining completion block (difficulty %d)...\n", difficulty);
+    mine_block(&complete_block);
+
     if (!save_block(&complete_block)) {
         printf("Failed to mark task as complete.\n");
         return 0;

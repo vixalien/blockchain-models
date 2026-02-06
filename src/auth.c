@@ -1,13 +1,15 @@
 #include "auth.h"
 #include "storage.h"
-#include "crypto.h"
+#include "sha256.h"
+#include "blockchain.h"
+#include "transaction.h"
+#include "mining.h"
 #include <stdio.h>
 #include <string.h>
 
 static char current_user[MAX_USERNAME_LEN] = "";
 
 int register_user(const char *username, const char *password) {
-    // Validate input
     if (strlen(username) == 0 || strlen(password) == 0) {
         printf("Username and password cannot be empty.\n");
         return 0;
@@ -16,8 +18,11 @@ int register_user(const char *username, const char *password) {
         printf("Username too long (max %d characters).\n", MAX_USERNAME_LEN - 1);
         return 0;
     }
+    if (!validate_text(username)) {
+        printf("Username cannot contain |, ;, or , characters.\n");
+        return 0;
+    }
 
-    // Check if username already exists
     User users[MAX_USERS];
     int count;
     load_users(users, &count);
@@ -29,7 +34,6 @@ int register_user(const char *username, const char *password) {
         }
     }
 
-    // Create new user
     User new_user;
     strncpy(new_user.username, username, MAX_USERNAME_LEN - 1);
     new_user.username[MAX_USERNAME_LEN - 1] = '\0';
@@ -38,6 +42,32 @@ int register_user(const char *username, const char *password) {
     if (!save_user(&new_user)) {
         printf("Failed to save user.\n");
         return 0;
+    }
+
+    /* Append a faucet coinbase block giving the new user starting coins */
+    Block blocks[MAX_BLOCKS];
+    int block_count;
+    load_blockchain(blocks, &block_count);
+
+    LedgerModel model;
+    int difficulty;
+    load_config(&model, &difficulty);
+
+    if (block_count > 0) {
+        Transaction tx;
+        create_coinbase_tx(&tx, username, FAUCET_AMOUNT);
+
+        Block faucet = create_block(block_count, &tx, "system", difficulty,
+                                    blocks[block_count - 1].hash);
+
+        printf("Mining faucet block for %s...\n", username);
+        mine_block(&faucet);
+
+        if (!save_block(&faucet)) {
+            printf("Warning: Failed to create faucet block.\n");
+        } else {
+            printf("Faucet: %.2f coins credited to %s.\n", FAUCET_AMOUNT / 100.0, username);
+        }
     }
 
     printf("Registration successful!\n");

@@ -8,20 +8,25 @@
 #define DATA_DIR "data"
 #define USERS_FILE "data/users.txt"
 #define BLOCKCHAIN_FILE "data/blockchain.txt"
+#define CONFIG_FILE "data/config.txt"
+#define DEFAULT_DIFFICULTY 3
 
-// Initialize data directory and files if they don't exist
+/* Initialize data directory and files */
 int init_data_files(void);
 
-// Load users from file (returns count of users loaded)
+/* User persistence */
 int load_users(User users[], int *count);
-
-// Save a new user to file (append)
 int save_user(const User *user);
 
-// Load blockchain from file (returns count of blocks loaded)
+/* Blockchain persistence (extended 17-field format) */
 int load_blockchain(Block blocks[], int *count);
-
-// Save a new block to file (append)
 int save_block(const Block *block);
+
+/* Config persistence (key=value format) */
+int load_config(LedgerModel *model, int *difficulty);
+int save_config(LedgerModel model, int difficulty);
+
+/* Validate that text contains no forbidden delimiters (|;,) */
+int validate_text(const char *text);
 
 #endif
