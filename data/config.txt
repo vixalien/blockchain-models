@@ -1,0 +1,2 @@
+ledger_model=1
+difficulty=3
